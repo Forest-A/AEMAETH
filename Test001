@@ -1,0 +1,130 @@
+#include <iostream>
+#include <TFile.h>
+#include <TH1D.h>
+#include <TF1.h>
+#include <TCanvas.h>
+#include <TRandom3.h>
+#include <TMath.h>
+#include <TVirtualFitter.h>
+#include <TMinuit.h>
+#include <TGraph.h>
+
+// SurvivalProb input: L, dm21_2, dm31_2, theta12, theta13
+double NOdata[5] = {52.5, 7.41e-5, 2.551e-3, 33.66, 49.1}; 
+double IOdata[5] = {52.5, 7.41e-5, -2.498e-3, 33.67, 49.5};
+
+const double baseline = 52.5; // km
+
+// Function to generate Gaussian-distributed observed values
+void GenerateGaussianData(int nBins, double mean, double stdDev, double* energyBins, double* observedValues) {
+    TRandom3 randGen(0); // Random generator with a seed
+    const double E_min = 1.8; // MeV
+    const double E_max = 15.0; // MeV
+    const double binWidth = (E_max - E_min) / nBins;
+
+    for (int ii = 0; ii < nBins; ++ii) {
+        double E = E_min + ii * binWidth + binWidth / 2.0;
+        energyBins[ii] = E;
+        observedValues[ii] = randGen.Gaus(mean, stdDev); // Generate Gaussian-distributed values
+    }
+}
+
+// Chi-squared calculation for NO or IO with Gaussian data
+double chi2(double *survProbData) {
+    const int nBins = 200;
+    const double E_min = 1.8; // MeV
+    const double E_max = 15.0; // MeV
+    const double binWidth = (E_max - E_min) / nBins;
+
+    double chiSquare = 0.0;
+    double observedValues[nBins];
+    double energyBins[nBins];
+    
+    // Generate Gaussian-distributed observed values
+    GenerateGaussianData(nBins, 1e7, 1e6, energyBins, observedValues);
+
+    for (int ii = 0; ii < nBins; ++ii) {
+        double expected = 40;  // Assuming a constant expected value of 40
+
+        // Calculate the chi-square contribution from this bin
+        if (expected > 0) {
+            chiSquare += TMath::Power((observedValues[ii] - expected), 2) / expected;
+        }
+    }
+
+    return chiSquare;
+}
+
+// FCN for TMinuit
+void chi2Function(int &npar, double *gin, double &f, double *par, int iflag) {
+    f = chi2(par);  // Use the parameters provided by TMinuit
+}
+
+// Function to minimize chi2 for NO or IO with Gaussian data
+double minimizeChi2(double *MHdata, double *fittedParams) {
+    TMinuit minuit(5);  // Number of parameters to minimize
+    minuit.SetFCN(chi2Function);
+
+    double arglist[10];
+    int ierflg = 0;
+    arglist[0] = 1;
+    minuit.mnexcm("SET ERR", arglist ,1,ierflg);
+
+    // Define the parameters with initial values and ranges
+    minuit.mnparm(0, "L", MHdata[0], 0.1, 50.0, 55.0, ierflg);
+    minuit.mnparm(1, "dm21_2", MHdata[1], 1e-6, 0.0, 1e-3, ierflg);
+    minuit.mnparm(2, "dm31_2", MHdata[2], 1e-5, -1e-2, 1e-2, ierflg);
+    minuit.mnparm(3, "theta12", MHdata[3], 0.01, 30.0, 40.0, ierflg);
+    minuit.mnparm(4, "theta13", MHdata[4], 0.01, 45.0, 55.0, ierflg);
+
+    // Now ready for minimization step
+    arglist[0] = 500;
+    arglist[1] = 1.;
+    minuit.mnexcm("MIGRAD", arglist ,2,ierflg);
+
+    // Print results
+    double amin, edm, errdef;
+    int nvpar, nparx, icstat;
+    minuit.mnstat(amin, edm, errdef, nvpar, nparx, icstat);
+
+    // Retrieve and store the minimized parameters
+    for (int i = 0; i < 5; i++) {
+        minuit.GetParameter(i, fittedParams[i], edm);
+    }
+    
+    return amin;
+}
+
+
+int main() {
+    double fittedParams_NO[5];
+    double fittedParams_IO[5];
+
+    std::cout << "Minimizing for Normal Ordering (NO):" << std::endl;
+    double chi2_NO = minimizeChi2(NOdata, fittedParams_NO); // Minimize for NO
+
+    std::cout << "Minimizing for Inverted Ordering (IO):" << std::endl;
+    double chi2_IO = minimizeChi2(IOdata, fittedParams_IO); // Minimize for IO
+
+    double chi2_difference = chi2_NO - chi2_IO;
+
+    std::cout << "Chi2 NO: " << chi2_NO << std::endl;
+    std::cout << "Chi2 IO: " << chi2_IO << std::endl;
+    std::cout << "Chi2 Difference (NO - IO): " << chi2_difference << std::endl;
+
+    std::cout << "Fitted Parameters for NO:" << std::endl;
+    std::cout << "L: " << fittedParams_NO[0] << std::endl;
+    std::cout << "dm21_2: " << fittedParams_NO[1] << std::endl;
+    std::cout << "dm31_2: " << fittedParams_NO[2] << std::endl;
+    std::cout << "theta12: " << fittedParams_NO[3] << std::endl;
+    std::cout << "theta13: " << fittedParams_NO[4] << std::endl;
+
+    std::cout << "Fitted Parameters for IO:" << std::endl;
+    std::cout << "L: " << fittedParams_IO[0] << std::endl;
+    std::cout << "dm21_2: " << fittedParams_IO[1] << std::endl;
+    std::cout << "dm31_2: " << fittedParams_IO[2] << std::endl;
+    std::cout << "theta12: " << fittedParams_IO[3] << std::endl;
+    std::cout << "theta13: " << fittedParams_IO[4] << std::endl;
+
+    return 0;
+}
