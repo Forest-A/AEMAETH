@@ -1,0 +1,158 @@
+#include <iostream>
+#include <TFile.h>
+#include <TH1D.h>
+#include <TF1.h>
+#include <TCanvas.h>
+#include <TMath.h>
+#include <TMinuit.h>
+#include <TGraph.h>
+#include <TLegend.h>
+#include <TStyle.h>
+
+// Function to generate Gaussian values
+void GenerateGaussianValues(int nBins, double mean, double stdDev, double* energyBins, double* values) {
+    const double E_min = 1.8; // MeV
+    const double E_max = 15.0; // MeV
+    const double binWidth = (E_max - E_min) / nBins;
+
+    TF1 gaussFunction("gaussFunction", "gaus", E_min, E_max);
+    gaussFunction.SetParameters(1.0, mean, stdDev); // Amplitude=1, mean, sigma
+
+    for (int ii = 0; ii < nBins; ++ii) {
+        double E = E_min + ii * binWidth + binWidth / 2.0;
+        energyBins[ii] = E;
+        values[ii] = gaussFunction.Eval(E); // Evaluate Gaussian function
+    }
+}
+
+// Chi-squared calculation for a constant expected value
+double chi2(double *params) {
+    const int nBins = 200;
+    const double E_min = 1.8; // MeV
+    const double E_max = 15.0; // MeV
+    const double binWidth = (E_max - E_min) / nBins;
+
+    double chiSquare = 0.0;
+    double observedValues[nBins];
+    double energyBins[nBins];
+    
+    // Generate Gaussian values with given parameters
+    GenerateGaussianValues(nBins, params[0], params[1], energyBins, observedValues);
+
+    for (int ii = 0; ii < nBins; ++ii) {
+        double expected = params[2];  // Constant expected value
+
+        // Calculate the chi-square contribution from this bin
+        if (expected > 0) {
+            chiSquare += TMath::Power((observedValues[ii] - expected), 2) / expected;
+        }
+    }
+
+    return chiSquare;
+}
+
+// FCN for TMinuit
+void chi2Function(int &npar, double *gin, double &f, double *par, int iflag) {
+    f = chi2(par);  // Use the parameters provided by TMinuit
+}
+
+// Function to minimize chi2 and extract fitted parameters
+void minimizeChi2(double *fittedParams) {
+    TMinuit minuit(3);  // Number of parameters to minimize (mean, sigma, expectation)
+    minuit.SetFCN(chi2Function);
+
+    double arglist[10];
+    int ierflg = 0;
+    arglist[0] = 1;
+    minuit.mnexcm("SET ERR", arglist, 1, ierflg);
+
+    // Define the parameters with initial values and ranges
+    minuit.mnparm(0, "Mean", 5.0, 1.0, 1.0, 10.0, ierflg);
+    minuit.mnparm(1, "Sigma", 1.0, 0.1, 0.1, 5.0, ierflg);
+    minuit.mnparm(2, "Expectation", 50.0, 1.0, 0.0, 100.0, ierflg);
+
+    // Now ready for minimization step
+    arglist[0] = 500;
+    arglist[1] = 1.;
+    minuit.mnexcm("MIGRAD", arglist, 2, ierflg);
+
+    // Print results
+    double amin, edm, errdef;
+    int nvpar, nparx, icstat;
+    minuit.mnstat(amin, edm, errdef, nvpar, nparx, icstat);
+
+    // Retrieve and store the minimized parameters
+    for (int ii = 0; ii < 3; ii++) {
+        minuit.GetParameter(ii, fittedParams[ii], edm);
+    }
+}
+
+int main() {
+    const int nBins = 200;
+    double energyBins[nBins];
+    double values[nBins];
+
+    // Generate Gaussian values
+    GenerateGaussianValues(nBins, 5.0, 1.0, energyBins, values);
+
+    // Create a histogram to store the generated data
+    TH1D *hist = new TH1D("hist", "Generated Gaussian Data", nBins, 1.8, 15.0);
+    for (int ii = 0; ii < nBins; ++ii) {
+        hist->SetBinContent(ii + 1, values[ii]);
+    }
+
+    // Minimize chi2 to find the best fit parameters
+    double fittedParams[3];
+    minimizeChi2(fittedParams);
+
+    // Print results for fitted parameters
+    std::cout << "Chi2 Minimization Results:" << std::endl;
+    std::cout << "Mean: " << fittedParams[0] << std::endl;
+    std::cout << "Sigma: " << fittedParams[1] << std::endl;
+    std::cout << "Expectation: " << fittedParams[2] << std::endl;
+
+    // Create a canvas for both plots
+    auto *c1 = new TCanvas("c1", "Gaussian Distribution and Fitted Gaussian", 1200, 600);
+    gStyle->SetOptStat(0);
+
+    // Draw the histogram for generated Gaussian data
+    hist->SetLineColor(kRed);
+    hist->SetLineWidth(2);
+    hist->Draw();
+
+    // Create a histogram for the fitted Gaussian
+    TH1D *fitHist = new TH1D("fitHist", "Fitted Gaussian", nBins, 1.8, 15.0);
+
+    // Define the fitted Gaussian function
+    TF1 *fittedGauss = new TF1("fittedGauss", "gaus", 1.8, 15.0);
+    fittedGauss->SetParameters(fittedParams[2], fittedParams[0], fittedParams[1]);
+    
+    // Fill the fitted Gaussian histogram
+    for (int ii = 0; ii < nBins; ++ii) {
+        double E = 1.8 + ii * (15.0 - 1.8) / nBins;
+        fitHist->SetBinContent(ii + 1, fittedGauss->Eval(E));
+    }
+
+    // Draw the fitted Gaussian histogram on the same canvas
+    fitHist->SetLineColor(kBlue);
+    fitHist->SetLineWidth(2);
+    fitHist->Draw("same");
+
+    // Create and draw the legend
+    TLegend *leg = new TLegend(0.6, 0.7, 0.9, 0.9);
+    leg->AddEntry(hist, Form("Generated Gaussian, \nMean: %.2f\n Sigma: %.2f", 5.0, 1.0), "l");
+    leg->AddEntry(fitHist, Form("Fitted Gaussian, \nMean: %.2f\n Sigma: %.2f", fittedParams[0], fittedParams[1]), "l");
+    leg->Draw();
+
+    // Save the canvas to a file
+    c1->SaveAs("gaussian_fit_001.png");
+
+    // Clean up
+    delete hist;
+    delete fitHist;
+    delete fittedGauss;
+    delete leg;
+    delete c1;
+
+    return 0;
+}
