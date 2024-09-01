@@ -1,0 +1,132 @@
+#include <iostream>
+#include <TFile.h>
+#include <TH1D.h>
+#include <TF1.h>
+#include <TCanvas.h>
+#include <TMath.h>
+#include <TMinuit.h>
+#include <TRandom3.h>
+#include <TStyle.h>
+#include <TLegend.h>
+
+// Generate Gaussian values and fill histogram
+void GenerateGaussianValues(int nBins, double mean, double stdDev, TH1D *hist) {
+    const double E_min = 1.8; // MeV
+    const double E_max = 15.0; // MeV
+    const double binWidth = (E_max - E_min) / nBins;
+
+    // Create a random number generator
+    TRandom3 rand;
+
+    // Fill histogram with Gaussian-distributed values
+    for (int ii = 0; ii < 1000; ++ii) {
+        double value = rand.Gaus(mean, stdDev);
+        if (value >= E_min && value <= E_max) {
+            hist->Fill(value);
+        }
+    }
+}
+
+void fcn(int &npar, double *gin, double &f, double *par, int iflag) {
+    TH1D *hist = (TH1D*) gDirectory->Get("hist");
+    const int nBins = hist->GetNbinsX();
+    const double binWidth = hist->GetBinWidth(1);
+
+    double chiSquare = 0.0;
+    for (int ii = 1; ii <= nBins; ++ii) {
+        double x = hist->GetBinCenter(ii);
+        double observed = hist->GetBinContent(ii);
+        double expected = TMath::Gaus(x, par[0], par[1]) * hist->Integral() * binWidth;
+
+        if (expected > 0) {
+            chiSquare += TMath::Power((observed - expected), 2) / expected;
+        }
+    }
+    f = chiSquare;
+}
+
+void minimizeChi2(double *fittedParams) {
+    TMinuit *Minuit = new TMinuit(2); // Initialize TMinuit with 2 params (mean and sigma)
+    Minuit->SetFCN(fcn);
+
+    double arglist[10];
+    int ierflg = 0;
+
+    arglist[0] = 1;
+    Minuit->mnexcm("SET ERR", arglist, 1, ierflg);
+
+    // Set starting values and step sizes for parameters
+    Minuit->mnparm(0, "Mean", 5.0, 0.1, 2.0, 8.0, ierflg);
+    Minuit->mnparm(1, "Sigma", 1.0, 0.1, 0.1, 3.0, ierflg);
+
+    // Now ready for minimization step
+    arglist[0] = 500;
+    arglist[1] = 1.;
+    Minuit->mnexcm("MIGRAD", arglist, 2, ierflg);
+
+    // Check convergence
+    if (ierflg != 0) {
+        std::cerr << "Minimization did not converge properly. Error code: " << ierflg << std::endl;
+    }
+
+    // Print results
+    double amin, edm, errdef;
+    int nvpar, nparx, icstat;
+    Minuit->mnstat(amin, edm, errdef, nvpar, nparx, icstat);
+
+    // Store the minimized parameters
+    for (int ii = 0; ii < 2; ++ii) {
+        Minuit->GetParameter(ii, fittedParams[ii], edm);
+    }
+
+    delete Minuit;
+}
+
+void PlotGaussianFit(int nBins, TH1D *hist, double *fittedParams) {
+    // Create a canvas for plotting
+    TCanvas *c1 = new TCanvas("c1", "Gaussian Fit", 800, 600);
+    gStyle->SetOptStat(0);
+    hist->Draw();
+
+    // Create a Gaussian fit function
+    TF1 *fitFunc = new TF1("fitFunc", "gaus", 1.8, 15.0);
+    fitFunc->SetParameters(fittedParams[0], fittedParams[1], hist->Integral()); // Set parameters (mean, sigma, amplitude)
+    hist->Fit(fitFunc);
+
+    // Draw the fitted function on the canvas
+    fitFunc->SetLineColor(kRed);
+    fitFunc->Draw("same");
+
+    // Draw legend
+    TLegend *leg = new TLegend(0.6, 0.7, 0.9, 0.9);
+    leg->AddEntry(hist, Form("Generated Gaussian, \nMean: %.2f\n Sigma: %.2f", 5.0, 1.0), "l");
+    leg->AddEntry(fitFunc, Form("Fitted Gaussian, \nMean: %.2f\n Sigma: %.2f", fittedParams[0], fittedParams[1]), "l");
+    leg->Draw();
+
+    // Save the canvas to a file
+    c1->SaveAs("gaussian_fit.png");
+
+    // Clean up
+    delete fitFunc;
+    delete c1;
+}
+
+int main() {
+    const int nBins = 200;
+    TH1D *hist = new TH1D("hist", "Generated Gaussian Data", nBins, 1.8, 15.0);
+    double fittedParams[2];
+
+    // Generate Gaussian values
+    GenerateGaussianValues(nBins, 5.0, 1.0, hist);
+
+    // Perform Gaussian fit using TMinuit
+    minimizeChi2(fittedParams);
+
+    // Plot the histogram and fit
+    PlotGaussianFit(nBins, hist, fittedParams);
+
+    // Clean up
+    delete hist;
+
+    return 0;
+}
