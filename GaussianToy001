@@ -18,12 +18,17 @@ void GenerateGaussianValues(int nBins, double mean, double stdDev, double* energ
     TF1 gaussFunction("gaussFunction", "gaus", E_min, E_max);
     gaussFunction.SetParameters(1.0, mean, stdDev); // Amplitude=1, mean, sigma
 
-    for (int ii = 0; ii < nBins; ++ii) {
+    for (int ii = 0; ii < nBins; ii++) {
         double E = E_min + ii * binWidth + binWidth / 2.0;
         energyBins[ii] = E;
         values[ii] = gaussFunction.Eval(E); // Evaluate Gaussian function
     }
 }
+
+////////////////////////////////////////////////////////////////////////////
+// the problem with this function is that, it gives the function value of a distribution, 
+// instead of generating a distribution itself.
+// You should use TRandom3 to sample a gaussian distribution.
 
 // Chi-squared calculation for a constant expected value
 double chi2(double *params) {
@@ -40,7 +45,8 @@ double chi2(double *params) {
     GenerateGaussianValues(nBins, params[0], params[1], energyBins, observedValues);
 
     for (int ii = 0; ii < nBins; ++ii) {
-        double expected = params[2];  // Constant expected value
+        //double expected = params[2];  // Constant expected value
+        double expected = params[2] * TMath::Gaus(energyBins[ii], params[0], params[1]) * binWidth;
 
         // Calculate the chi-square contribution from this bin
         if (expected > 0) {
@@ -51,6 +57,16 @@ double chi2(double *params) {
     return chiSquare;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////
+// In the abstraction of the problem, you can use binned value for a fit function, 
+// but you should not use the same function that generate both your mock data and the fit function.
+// OK, I see that you are generating the mock data inside the chi2 function
+//. This is problematic: the mock data should be generated once and for all and live through the whole minimisation; 
+// if you put it inside chi2, every time TMinute makes a step the same mock data is generated again and again. 
+// Move the mock data out and try to use global variable for this. 
+
+
+
 // FCN for TMinuit
 void chi2Function(int &npar, double *gin, double &f, double *par, int iflag) {
     f = chi2(par);  // Use the parameters provided by TMinuit
@@ -58,33 +74,45 @@ void chi2Function(int &npar, double *gin, double &f, double *par, int iflag) {
 
 // Function to minimize chi2 and extract fitted parameters
 void minimizeChi2(double *fittedParams) {
-    TMinuit minuit(3);  // Number of parameters to minimize (mean, sigma, expectation)
-    minuit.SetFCN(chi2Function);
+    TMinuit *gMinuit = new TMinuit(2);  //initialize TMinuit with a maximum of 3 params
+    gMinuit->SetFCN(chi2Function);
+
+////////////////////////////////////////////////////////////////////////////////////////////
+// The house rule is, gSomething means that Something has a global scope.
+// Btw, kSomething means some cnostant. So, do not define locally a gSomething. Rename it.
+
+
 
     double arglist[10];
     int ierflg = 0;
+
     arglist[0] = 1;
-    minuit.mnexcm("SET ERR", arglist, 1, ierflg);
+    gMinuit->mnexcm("SET ERR", arglist, 1, ierflg);
 
     // Define the parameters with initial values and ranges
-    minuit.mnparm(0, "Mean", 5.0, 1.0, 1.0, 10.0, ierflg);
-    minuit.mnparm(1, "Sigma", 1.0, 0.1, 0.1, 5.0, ierflg);
-    minuit.mnparm(2, "Expectation", 50.0, 1.0, 0.0, 100.0, ierflg);
+    gMinuit->mnparm(0, "Mean", 5.0, 0.01, 2.0, 6.0, ierflg);
+    gMinuit->mnparm(1, "Sigma", 1.0, 0.01, 0.5, 2.0, ierflg);
 
     // Now ready for minimization step
-    arglist[0] = 500;
+    arglist[0] = 500; // Number of iterations
     arglist[1] = 1.;
-    minuit.mnexcm("MIGRAD", arglist, 2, ierflg);
+    gMinuit->mnexcm("MIGRAD", arglist ,2 ,ierflg);
+    // gMinuit->mnexcm("MINIMIZE", arglist, 1, ierflg);
 
     // Print results
     double amin, edm, errdef;
     int nvpar, nparx, icstat;
-    minuit.mnstat(amin, edm, errdef, nvpar, nparx, icstat);
+    gMinuit->mnstat(amin, edm, errdef, nvpar, nparx, icstat);
 
-    // Retrieve and store the minimized parameters
+    // Store the minimized parameters
     for (int ii = 0; ii < 3; ii++) {
-        minuit.GetParameter(ii, fittedParams[ii], edm);
+        gMinuit->GetParameter(ii, fittedParams[ii], edm);
     }
+
+    // Check convergence
+    if (ierflg != 0) {
+    std::cerr << "Minimization did not converge properly. Error code: " << ierflg << std::endl;
+}
 }
 
 int main() {
@@ -97,7 +125,7 @@ int main() {
 
     // Create a histogram to store the generated data
     TH1D *hist = new TH1D("hist", "Generated Gaussian Data", nBins, 1.8, 15.0);
-    for (int ii = 0; ii < nBins; ++ii) {
+    for (int ii = 0; ii < nBins; ii++) {
         hist->SetBinContent(ii + 1, values[ii]);
     }
 
@@ -125,10 +153,10 @@ int main() {
 
     // Define the fitted Gaussian function
     TF1 *fittedGauss = new TF1("fittedGauss", "gaus", 1.8, 15.0);
-    fittedGauss->SetParameters(fittedParams[2], fittedParams[0], fittedParams[1]);
+    fittedGauss->SetParameters(1.0, fittedParams[0], fittedParams[1]);
     
     // Fill the fitted Gaussian histogram
-    for (int ii = 0; ii < nBins; ++ii) {
+    for (int ii = 0; ii < nBins; ii++) {
         double E = 1.8 + ii * (15.0 - 1.8) / nBins;
         fitHist->SetBinContent(ii + 1, fittedGauss->Eval(E));
     }
@@ -138,7 +166,11 @@ int main() {
     fitHist->SetLineWidth(2);
     fitHist->Draw("same");
 
-    // Create and draw the legend
+//////////////////////////////////////////////////////////////////////////////////////////////////
+// TF1 can directly Draw. You don't need to use a Hist for that.
+// Also, encapsulate the drawing part as a function and move it out of main().
+
+    // Create the legend
     TLegend *leg = new TLegend(0.6, 0.7, 0.9, 0.9);
     leg->AddEntry(hist, Form("Generated Gaussian, \nMean: %.2f\n Sigma: %.2f", 5.0, 1.0), "l");
     leg->AddEntry(fitHist, Form("Fitted Gaussian, \nMean: %.2f\n Sigma: %.2f", fittedParams[0], fittedParams[1]), "l");
