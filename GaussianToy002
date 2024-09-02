@@ -13,7 +13,6 @@
 void GenerateGaussianValues(int nBins, double mean, double stdDev, TH1D *hist) {
     const double E_min = 1.8; // MeV
     const double E_max = 15.0; // MeV
-    const double binWidth = (E_max - E_min) / nBins;
 
     // Create a random number generator
     TRandom3 rand;
@@ -56,8 +55,8 @@ void minimizeChi2(double *fittedParams) {
     Minuit->mnexcm("SET ERR", arglist, 1, ierflg);
 
     // Set starting values and step sizes for parameters
-    Minuit->mnparm(0, "Mean", 5.0, 0.1, 2.0, 8.0, ierflg);
-    Minuit->mnparm(1, "Sigma", 1.0, 0.1, 0.1, 3.0, ierflg);
+    Minuit->mnparm(0, "Mean", 5.0, 0.1, 0.0, 10.0, ierflg);
+    Minuit->mnparm(1, "Sigma", 1.0, 0.1, 0.0, 5.0, ierflg);
 
     // Now ready for minimization step
     arglist[0] = 500;
