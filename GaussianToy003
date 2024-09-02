@@ -1,0 +1,171 @@
+#include <iostream>
+#include <TFile.h>
+#include <TH1D.h>
+#include <TF1.h>
+#include <TCanvas.h>
+#include <TMath.h>
+#include <TMinuit.h>
+#include <TRandom3.h>
+#include <TStyle.h>
+#include <TLegend.h>
+
+// Generate Gaussian values and fill histogram
+void GenerateGaussianValues(const int nBins, double mean, double stdDev, TH1D *hist) {
+    const double x_min = 1.8; // MeV
+    const double x_max = 15.0; // MeV
+
+    // Create a random number generator
+    TRandom3 *rand = new TRandom3();
+    rand->SetSeed(1);
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    // In default construction, seed is 0, the seed is automatically computed via a TUUID object.
+    // In this case the seed is guaranteed to be unique in space and time.
+    // For reproducibility, a fixed seed should be used.
+    // Given the same seed number, a random number generator will generate the same series of random numbers each time a simulation is run.
+
+    // An TF1 object is used because TRandom3 only supports Gaussian functions with mean and standard deviation.
+    TF1* gauss = new TF1("gaussian", "[0]*exp(-0.5*((x-[1])**2)/([2]*[2]))", x_min, x_max);
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    // The normalization should be treated as a parameter to be fitted because if the amplitude
+    // is not correctly estimated, the height of the Gaussian peak may not match the observed data,
+    // which can lead to a poor fit.
+    gauss->SetParameters(1.0, 5.0, 1.0); // Amplitude=1.0, Mean=5.0, StdDev=1.0
+
+    // Fill histogram with Gaussian-distributed values
+    for (int ii = 0; ii < 1000; ii++) {
+        double value = gauss->GetRandom();
+        if (value >= x_min && value <= x_max) {
+            hist->Fill(value);
+        }
+    }
+}
+
+void fcn(int &npar, double *gin, double &ff, double *par, int iflag) {
+    const TH1D *hist = (TH1D*) gDirectory->Get("hist"); // Always protect data with const!
+
+    //Always check pointer first in such operations!
+    if (hist == nullptr) {
+        std::cerr << "Error: The histogram is not properly generated." << std::endl;
+        return; // Exit the function if histogram is not found
+    }
+
+    const int nBins = hist->GetNbinsX();
+    const double binWidth = hist->GetBinWidth(1);
+
+    double chiSquare = 0.0;
+    for (int ii = 1; ii <= nBins; ii++) {
+        double xx = hist->GetBinCenter(ii);
+        const double generated = hist->GetBinContent(ii);
+        const double fit = par[0] * TMath::Gaus(xx, par[1], par[2]) * binWidth;
+
+        if (generated > 0) {
+            chiSquare += TMath::Power((fit - generated), 2) / generated;
+        }
+    /////////////////////////////////////////////////////////////////////////////////////////////////////
+    //please get the errors of the 3 parameters (normalisation, mean, sigma). 
+    // On the other hand, you can call TH1::GetMeanError, GetRMSError, etc. 
+    // Compare to your fitted error and tell me if they make sense.
+    }
+    ff = chiSquare;
+}
+
+void minimizeChi2(double *outpar, double *err) {
+    TMinuit *Minuit = new TMinuit(3); // Initialize TMinuit with 2 params (mean and sigma)
+    Minuit->SetFCN(fcn);
+
+    double arglist[10];
+    int ierflg = 0;
+
+    arglist[0] = 1;
+    Minuit->mnexcm("SET ERR", arglist, 1, ierflg);
+
+    // Set starting values and step sizes for parameters
+    Minuit->mnparm(0, "Normalisation", 1.0, 0.1, 0.0, 5.0, ierflg);
+    Minuit->mnparm(1, "Mean", 5.0, 0.1, 0.0, 10.0, ierflg);
+    Minuit->mnparm(2, "Sigma", 1.0, 0.1, 0.0, 5.0, ierflg);
+
+    // Now ready for minimization step
+    arglist[0] = 500;
+    arglist[1] = 1.0;
+    Minuit->mnexcm("MIGRAD", arglist, 2, ierflg);
+
+    // Check convergence
+    if (ierflg != 0) {
+        std::cerr << "Minimization did not converge properly. Error code: " << ierflg << std::endl;
+    }
+
+    for(int ii=0; ii<3; ii++){
+        Minuit->GetParameter(ii,outpar[ii],err[ii]); 
+        std::cout << "Parameter " << ii << ": " << outpar[ii] 
+                 << " with error: " << err[ii] << std::endl;    
+    }
+
+    delete Minuit;
+}
+
+void PlotGaussianFit(const int nBins, TH1D *hist, TF1 *fitFunc) {
+ 
+    TCanvas *c1 = new TCanvas("c1", "Gaussian Fit", 800, 600);
+    gStyle->SetOptStat(0);
+    hist->Draw();
+
+    // Draw the fitted function on the canvas
+    fitFunc->SetLineColor(kRed);
+    fitFunc->Draw("same");
+
+    // Save the canvas to a file
+    c1->SaveAs("gaussian_fit.png");
+
+    // Create a ROOT file
+    TFile *file = TFile::Open("fit_results.root", "RECREATE");
+    if (!file->IsOpen() || file->IsZombie()) {
+       std::cerr << "Error opening file" << std::endl;
+       exit(-1);
+    }
+
+    // Write histogram and function to the ROOT file
+    hist->Write("histogram");
+    fitFunc->Write("fitFunction");
+    c1->Write("canvas");
+
+    // Close the ROOT file
+    file->Close();
+
+
+    // Clean up
+    delete file;
+    delete fitFunc;
+    delete c1;
+}
+
+
+int main() {
+    const int nBins = 200;
+    TH1D *hist = new TH1D("hist", "Generated Gaussian Data", nBins, 1.8, 15.0);
+    double err[3];
+    double outpar[3];
+  
+
+    // Generate Gaussian values
+    GenerateGaussianValues(nBins, 5.0, 1.0, hist);
+
+
+    // Perform Gaussian fit using TMinuit
+    minimizeChi2(outpar, err);
+
+    TF1 *fitFunc = new TF1("fitFunc", "[0]*exp(-0.5*((x-[1])**2)/([2]*[2]))", 1.8, 15.0);
+    fitFunc->SetParameters(outpar[0], outpar[1], outpar[2]); // Set parameters (amplitude, mean, sigma)
+
+    PlotGaussianFit(200, hist, fitFunc);
+
+    double stdevError = hist->GetRMSError();
+    double meanError = hist->GetMeanError();
+
+    std::cerr << "mean error is " << meanError << std::endl;
+    std::cerr << "stdev error is " << stdevError << std::endl;
+
+    return 0;
+}
+
+
+   
