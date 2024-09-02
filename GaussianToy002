@@ -18,7 +18,7 @@ void GenerateGaussianValues(int nBins, double mean, double stdDev, TH1D *hist) {
     TRandom3 rand;
 
     // Fill histogram with Gaussian-distributed values
-    for (int ii = 0; ii < 1000; ++ii) {
+    for (int ii = 0; ii < 1000; ii++) {
         double value = rand.Gaus(mean, stdDev);
         if (value >= E_min && value <= E_max) {
             hist->Fill(value);
@@ -32,7 +32,7 @@ void fcn(int &npar, double *gin, double &f, double *par, int iflag) {
     const double binWidth = hist->GetBinWidth(1);
 
     double chiSquare = 0.0;
-    for (int ii = 1; ii <= nBins; ++ii) {
+    for (int ii = 1; ii <= nBins; ii++) {
         double x = hist->GetBinCenter(ii);
         double observed = hist->GetBinContent(ii);
         double expected = TMath::Gaus(x, par[0], par[1]) * hist->Integral() * binWidth;
@@ -74,7 +74,7 @@ void minimizeChi2(double *fittedParams) {
     Minuit->mnstat(amin, edm, errdef, nvpar, nparx, icstat);
 
     // Store the minimized parameters
-    for (int ii = 0; ii < 2; ++ii) {
+    for (int ii = 0; ii < 2; ii++) {
         Minuit->GetParameter(ii, fittedParams[ii], edm);
     }
 
