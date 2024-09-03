@@ -10,7 +10,7 @@
 #include <TLegend.h>
 
 // Generate Gaussian values and fill histogram
-void GenerateGaussianValues(const int nBins, double mean, double stdDev, TH1D *hist) {
+void GenerateGaussianValues(const int nBins, double amp, double mean, double stdDev, TH1D *hist) {
     const double x_min = 1.8; // MeV
     const double x_max = 15.0; // MeV
 
@@ -29,7 +29,7 @@ void GenerateGaussianValues(const int nBins, double mean, double stdDev, TH1D *h
     // The normalization should be treated as a parameter to be fitted because if the amplitude
     // is not correctly estimated, the height of the Gaussian peak may not match the observed data,
     // which can lead to a poor fit.
-    gauss->SetParameters(1.0, 5.0, 1.0); // Amplitude=1.0, Mean=5.0, StdDev=1.0
+    gauss->SetParameters(amp, mean, stdDev); 
 
     // Fill histogram with Gaussian-distributed values
     for (int ii = 0; ii < 1000; ii++) {
@@ -54,53 +54,62 @@ void fcn(int &npar, double *gin, double &ff, double *par, int iflag) {
 
     double chiSquare = 0.0;
     for (int ii = 1; ii <= nBins; ii++) {
-        double xx = hist->GetBinCenter(ii);
+        const double xx = hist->GetBinCenter(ii);
         const double generated = hist->GetBinContent(ii);
         const double fit = par[0] * TMath::Gaus(xx, par[1], par[2]) * binWidth;
 
         if (generated > 0) {
             chiSquare += TMath::Power((fit - generated), 2) / generated;
         }
-    /////////////////////////////////////////////////////////////////////////////////////////////////////
-    //please get the errors of the 3 parameters (normalisation, mean, sigma). 
-    // On the other hand, you can call TH1::GetMeanError, GetRMSError, etc. 
-    // Compare to your fitted error and tell me if they make sense.
     }
     ff = chiSquare;
 }
 
-void minimizeChi2(double *outpar, double *err) {
-    TMinuit *Minuit = new TMinuit(3); // Initialize TMinuit with 2 params (mean and sigma)
-    Minuit->SetFCN(fcn);
+
+void PerformSingleFit(TF1* fitFunc, double* outpar, double* err) {
+    TMinuit Minuit(3);
+    Minuit.SetFCN(fcn);
 
     double arglist[10];
     int ierflg = 0;
 
     arglist[0] = 1;
-    Minuit->mnexcm("SET ERR", arglist, 1, ierflg);
+    Minuit.mnexcm("SET ERR", arglist, 1, ierflg);
 
-    // Set starting values and step sizes for parameters
-    Minuit->mnparm(0, "Normalisation", 1.0, 0.1, 0.0, 5.0, ierflg);
-    Minuit->mnparm(1, "Mean", 5.0, 0.1, 0.0, 10.0, ierflg);
-    Minuit->mnparm(2, "Sigma", 1.0, 0.1, 0.0, 5.0, ierflg);
+    Minuit.mnparm(0, "Amplitude", outpar[0], 0.1, -1e3, 1e3, ierflg);
+    Minuit.mnparm(1, "Mean", outpar[1], 0.1, -1e3, 1e3, ierflg);
+    Minuit.mnparm(2, "Sigma", outpar[2], 0.1, -1e3, 1e3, ierflg);
 
-    // Now ready for minimization step
-    arglist[0] = 500;
-    arglist[1] = 1.0;
-    Minuit->mnexcm("MIGRAD", arglist, 2, ierflg);
+    arglist[0] = 500;  // Maximum number of iterations
+    arglist[1] = 1.0;  // Tolerance
+    Minuit.mnexcm("MIGRAD", arglist, 2, ierflg);
 
     // Check convergence
     if (ierflg != 0) {
         std::cerr << "Minimization did not converge properly. Error code: " << ierflg << std::endl;
     }
 
-    for(int ii=0; ii<3; ii++){
-        Minuit->GetParameter(ii,outpar[ii],err[ii]); 
-        std::cout << "Parameter " << ii << ": " << outpar[ii] 
-                 << " with error: " << err[ii] << std::endl;    
+    for (int ii = 0; ii < 3; ii++) {
+        Minuit.GetParameter(ii, outpar[ii], err[ii]);
     }
 
-    delete Minuit;
+    // Update the fit function parameters
+    fitFunc->SetParameters(outpar[0], outpar[1], outpar[2]);
+}
+
+// Function to perform iterative fitting
+void IterativeFit(TF1* fitFunc, const int iterations, double *outpar, double *err) {
+
+    for (int ii = 0; ii < iterations; ii++) {
+        std::cout << "Iteration " << ii + 1 << std::endl;
+        PerformSingleFit(fitFunc, outpar, err);
+
+        // Output the parameters after each iteration
+        std::cout << "Parameters after iteration " << ii + 1 << ":"
+                  << " Amplitude: " << outpar[0]
+                  << ", Mean: " << outpar[1]
+                  << ", Sigma: " << outpar[2] << std::endl;
+    }
 }
 
 void PlotGaussianFit(const int nBins, TH1D *hist, TF1 *fitFunc) {
@@ -114,7 +123,7 @@ void PlotGaussianFit(const int nBins, TH1D *hist, TF1 *fitFunc) {
     fitFunc->Draw("same");
 
     // Save the canvas to a file
-    c1->SaveAs("gaussian_fit.png");
+    c1->SaveAs("gaussian_fit001.png");
 
     // Create a ROOT file
     TFile *file = TFile::Open("fit_results.root", "RECREATE");
@@ -138,34 +147,37 @@ void PlotGaussianFit(const int nBins, TH1D *hist, TF1 *fitFunc) {
     delete c1;
 }
 
-
 int main() {
     const int nBins = 200;
-    TH1D *hist = new TH1D("hist", "Generated Gaussian Data", nBins, 1.8, 15.0);
+    double outpar[3] = {-400.0, -500.0, 100.0}; // Initial guesses
     double err[3];
-    double outpar[3];
   
+    TH1D *hist = new TH1D("hist", "Generated Gaussian Data", nBins, 1.8, 15.0);
+    TF1 *fitFunc = new TF1("fitFunc", "[0]*exp(-0.5*((x-[1])**2)/([2]*[2]))", 1.8, 15.0);
 
     // Generate Gaussian values
-    GenerateGaussianValues(nBins, 5.0, 1.0, hist);
+    GenerateGaussianValues(nBins, 1.0, 5.0, 1.0, hist); // amp, mean, stdDev
 
 
-    // Perform Gaussian fit using TMinuit
-    minimizeChi2(outpar, err);
+    // Perform the iterative fitting
+    int nIterations = 5;  // Number of iterations for fitting
+    IterativeFit(fitFunc, nIterations, outpar, err);
 
-    TF1 *fitFunc = new TF1("fitFunc", "[0]*exp(-0.5*((x-[1])**2)/([2]*[2]))", 1.8, 15.0);
-    fitFunc->SetParameters(outpar[0], outpar[1], outpar[2]); // Set parameters (amplitude, mean, sigma)
+    fitFunc->SetParameters(outpar[0], outpar[1], outpar[2]); //Set parameters (amplitude, mean, sigma)
 
-    PlotGaussianFit(200, hist, fitFunc);
+    PlotGaussianFit(nBins, hist, fitFunc);
 
-    double stdevError = hist->GetRMSError();
-    double meanError = hist->GetMeanError();
+    // Output the parameters with their errors
+    const double stdevError = hist->GetRMSError();
+    const double meanError = hist->GetMeanError();
 
-    std::cerr << "mean error is " << meanError << std::endl;
-    std::cerr << "stdev error is " << stdevError << std::endl;
+    std::cerr << "mean error from GetMeanError is " << meanError << std::endl;
+    std::cerr << "stdev error from GetRMSError is " << stdevError << std::endl;
+
+     for(int ii=0; ii<3; ii++){
+        std::cout << "Parameter " << ii << ": " << outpar[ii] 
+                 << " with error: " << err[ii] << std::endl;    
+    }
 
     return 0;
 }
-
-
-   
