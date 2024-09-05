@@ -30,3 +30,6 @@ fi
 
 # Call the compile function with the provided arguments
 compile "$1" "$2"
+
+#./make.sh /home/motoko/Sisyphus/stone001.C /home/motoko/stone01.C
+#./stone01.C
