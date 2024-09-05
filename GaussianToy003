@@ -9,67 +9,46 @@
 #include <TStyle.h>
 #include <TLegend.h>
 
+// Generate Gaussian values and fill histogram
 // Global pointer to the histogram
 TH1D *globalHist = nullptr;
+TRandom3 *gRand = new TRandom3(123);
 
 // Generate Gaussian values and fill histogram
-void GenerateGaussianValues(const int nBins, const double amp, const double mean, const double stdDev, TH1D *hist) {
-    const double x_min = 1.8; // MeV
-    const double x_max = 15.0; // MeV
+void GenerateGaussianValues(TH1D *hist, double amplitude, double mean, double stdDev){
 
-    globalHist = hist;
-    // Create a random number generator
-    TRandom3 gRan(123);
-    //////////////////////////////////////////////////////////////////////////////////////////////////////
-    // In default construction, seed is 0, the seed is automatically computed via a TUUID object.
-    // In this case the seed is guaranteed to be unique in space and time.
-    // For reproducibility, a fixed seed should be used.
-    // Given the same seed number, a random number generator will generate the same series of random numbers each time a simulation is run.
-
-    // An TF1 object is used because TRandom3 only supports Gaussian functions with mean and standard deviation.
-    TF1* gauss = new TF1("gaussian", "[0]*exp(-0.5*((x-[1])**2)/([2]*[2]))", x_min, x_max);
-    //////////////////////////////////////////////////////////////////////////////////////////////////////
-    // The normalization should be treated as a parameter to be fitted because if the amplitude
-    // is not correctly estimated, the height of the Gaussian peak may not match the observed data,
-    // which can lead to a poor fit.
-    gauss->SetParameters(amp, mean, stdDev); 
-    int entries = static_cast<int>(amp * 1000);
-
-    // Fill histogram with Gaussian-distributed values
-    for (int ii = 0; ii < entries; ii++) {
-        double value = gauss->GetRandom();
-        if (value >= x_min && value <= x_max) {
-            hist->Fill(value);
-        }
-    }
-    delete gauss;
+	for (int ii = 0; ii < 1e4; ii++) {
+		hist->Fill(gRand->Gaus(mean, stdDev));
+	}
 }
 
 void fcn(int &npar, double *gin, double &ff, double *par, int iflag) {
+    const TH1D *hist = (TH1D*) gDirectory->Get("hist"); // Always protect data with const!
+
     //Always check pointer first in such operations!
-    if (globalHist == nullptr) {
+    if (hist == nullptr) {
         std::cerr << "Error: The histogram is not properly generated." << std::endl;
         return; // Exit the function if histogram is not found
     }
 
-    const int nBins = globalHist->GetNbinsX();
-    const double binWidth = globalHist->GetBinWidth(1);
+    const int nBins = hist->GetNbinsX();
+    const double binWidth = hist->GetBinWidth(1);
 
     double chiSquare = 0.0;
     for (int ii = 1; ii <= nBins; ii++) {
-        const double xx = globalHist->GetBinCenter(ii);
-        const double generated = globalHist->GetBinContent(ii);
-        const double fit = par[0]* TMath::Gaus(xx, par[1], par[2]) * binWidth;
+        const double xx = hist->GetBinCenter(ii);
+        const double generated = hist->GetBinContent(ii);
+        const double fit = par[0] * TMath::Gaus(xx, par[1], par[2]) * binWidth;
 
         if (generated > 0) {
-            chiSquare += TMath::Power((fit - generated), 2) / fit;
+            chiSquare += TMath::Power((fit - generated), 2) / generated;
         }
     }
     ff = chiSquare;
 }
 
 
-bool PerformSingleFit(TF1* fitFunc, double* outpar, double* err) {
+void PerformSingleFit(TF1* fitFunc, double* outpar, double* err) {
     TMinuit Minuit(3);
     Minuit.SetFCN(fcn);
 
@@ -79,7 +58,7 @@ bool PerformSingleFit(TF1* fitFunc, double* outpar, double* err) {
     arglist[0] = 1;
     Minuit.mnexcm("SET ERR", arglist, 1, ierflg);
 
-    Minuit.mnparm(0, "Amplitude", outpar[0], 0.1, -1e4, 1e4, ierflg);
+    Minuit.mnparm(0, "Amplitude", outpar[0], 0.1, -1e3, 1e3, ierflg);
     Minuit.mnparm(1, "Mean", outpar[1], 0.1, -1e3, 1e3, ierflg);
     Minuit.mnparm(2, "Sigma", outpar[2], 0.1, -1e3, 1e3, ierflg);
 
@@ -90,7 +69,6 @@ bool PerformSingleFit(TF1* fitFunc, double* outpar, double* err) {
     // Check convergence
     if (ierflg != 0) {
         std::cerr << "Minimization did not converge properly. Error code: " << ierflg << std::endl;
-        return false;
     }
 
     for (int ii = 0; ii < 3; ii++) {
@@ -99,33 +77,24 @@ bool PerformSingleFit(TF1* fitFunc, double* outpar, double* err) {
 
     // Update the fit function parameters
     fitFunc->SetParameters(outpar[0], outpar[1], outpar[2]);
-    return true;
 }
 
+// Function to perform iterative fitting
 void IterativeFit(TF1* fitFunc, const int iterations, double *outpar, double *err) {
-    bool converged = false;
 
     for (int ii = 0; ii < iterations; ii++) {
         std::cout << "Iteration " << ii + 1 << std::endl;
-        converged = PerformSingleFit(fitFunc, outpar, err);
+        PerformSingleFit(fitFunc, outpar, err);
 
-        // When converged = flase need to stop
-        if (!converged) {
-            std::cerr << "Stopping iterations due to minimization failure." << std::endl;
-            break;
-        }
-
-        if (converged) {
-            std::cout << "Final parameters:"
+        // Output the parameters after each iteration
+        std::cout << "Parameters after iteration " << ii + 1 << ":"
                   << " Amplitude: " << outpar[0]
                   << ", Mean: " << outpar[1]
-                 << ", Sigma: " << outpar[2] << std::endl;
-        }         
+                  << ", Sigma: " << outpar[2] << std::endl;
     }
 }
 
-
-void PlotGaussianFit(const int nBins, TH1D *hist, TF1 *fitFunc) {
+void PlotGaussianFit(TH1D *hist, TF1 *fitFunc) {
  
     TCanvas *c1 = new TCanvas("c1", "Gaussian Fit", 800, 600);
     gStyle->SetOptStat(0);
@@ -133,50 +102,48 @@ void PlotGaussianFit(const int nBins, TH1D *hist, TF1 *fitFunc) {
 
     // Draw the fitted function on the canvas
     fitFunc->SetLineColor(kRed);
+    fitFunc->SetNpx(1e5);
     fitFunc->Draw("same");
 
     // Save the canvas to a file
     c1->SaveAs("gaussian_fit001.png");
 
-    // Create a ROOT file
-    TFile *file = TFile::Open("fit_results.root", "RECREATE");
-    if (!file->IsOpen() || file->IsZombie()) {
-       std::cerr << "Error opening file" << std::endl;
-       exit(-1);
-    }
-
-    // Write histogram and function to the ROOT file
-    hist->Write("histogram");
-    fitFunc->Write("fitFunction");
-    c1->Write("canvas");
-
-    // Close the ROOT file
-    file->Close();
-
-
-    // Clean up
-    delete file;
+     // Clean up
     delete fitFunc;
     delete c1;
 }
 
 int main() {
-    const int nBins = 200;
-    double outpar[3] = {100.0, 500.0, 100.0}; // Initial guesses
-    double err[3];
+    // const int nBins = 200;
+    // double outpar[3] = {-400.0, -500.0, 100.0}; // Initial guesses
+    // double err[3];
   
-    TH1D *hist = new TH1D("hist", "Generated Gaussian Data", nBins, 1.8, 15.0);
-    TF1 *fitFunc = new TF1("fitFunc", "[0]*exp(-0.5*((x-[1])**2)/([2]*[2]))", 1.8, 15.0);
+    TH1D *hist = new TH1D("hist", "Generated Gaussian Data", 200, -20.0, 20.0);
+    TF1 *fitFunc = new TF1("fitFunc", "[0] * TMath::Gaus(x, [1], [2])", -1e4, 1e4);
 
     // Generate Gaussian values
-    GenerateGaussianValues(nBins, 1000.0, 5.0, 1.0, hist); // amp, mean, stdDev
+    GenerateGaussianValues(hist, 1.0, 0.0, 1.0); // amp, mean, stdDev
 
+    // Extract initial guesses from the hist
+	int peakBin = hist->GetMaximumBin();   // Get the bin number of the maximum
+	double peakContent = hist->GetBinContent(peakBin);  // Get the content (height) of the peak bin
+
+	std::cout<<"!!!!!!!!!!!"<<peakContent<<std::endl;
+
+	double mean = hist->GetMean();
+	double stdDev =  hist->GetStdDev();
+
+	double outpar[3] = {peakContent, mean, stdDev}; // Initial guesses
+	double err[3];
 
     // Perform the iterative fitting
     int nIterations = 5;  // Number of iterations for fitting
     IterativeFit(fitFunc, nIterations, outpar, err);
 
-    PlotGaussianFit(nBins, hist, fitFunc);
+    fitFunc->SetParameters(peakContent, mean, stdDev);
+
+
+    PlotGaussianFit(hist, fitFunc);
 
     // Output the parameters with their errors
     const double stdevError = hist->GetRMSError();
