@@ -5,11 +5,15 @@
 on Ubuntu 17.10 or later
 
 Look for YAML files in `/etc/netplan/`. For example:
-`ls /etc/netplan/`
+```
+ls /etc/netplan/
+```
 
 Open the `.yaml` file in `/etc/netplan/`
 
-`sudo emacs /etc/netplan/01-netcfg.yaml`
+```
+sudo emacs /etc/netplan/01-netcfg.yaml
+```
 
 Add or modify the configuration to include:
 ```
@@ -24,7 +28,9 @@ network:
 
 Run the following command to apply the configuration:
 
-`sudo netplan apply`
+```
+sudo netplan apply
+```
 
 
 - If encounter warnings about permissions, such as:
@@ -34,4 +40,6 @@ Run the following command to apply the configuration:
     
  Ensure that the permissions for the Netplan configuration file are correct. Set them using:
 
-`sudo chmod 600 /etc/netplan/01-netcfg.yaml`
+```
+sudo chmod 600 /etc/netplan/01-netcfg.yaml
+```
