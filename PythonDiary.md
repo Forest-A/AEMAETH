@@ -1,5 +1,7 @@
 - [Set Up a Python Virtual Environment](#set-up-a-python-virtual-environment)
 - [Set Up Interactive Plotting in Bash Shell](#set-up-interactive-plotting-in-bash-shell)
+- [Resolve LaTeX Error in Matplotlib](#resolve-latex-error-in-matplotlib)
+- [Return to Default Plotting Settings After Using SciencePlot](#return-to-default-plotting-settings-after-using-scienceplot)
 
 
 ## Set Up a Python Virtual Environment
@@ -70,3 +72,20 @@ To execute a Python script directly from the IPython shell, the following comman
 exec(open('<path_to_your_script>').read())
 ```
 Replace <path_to_your_script> with the actual path of the script to be executed.
+
+
+## Resolve LaTeX Error in Matplotlib
+adding the following line to the Python script:
+(import matplotlib as mpl)
+```
+mpl.rcParams['text.usetex'] = False
+```
+to the Python script
+
+## Return to Default Plotting Settings After Using SciencePlot
+adding the following line to the Python script:
+(import matplotlib as mpl)
+```
+mpl.rcdefaults()
+```
+
