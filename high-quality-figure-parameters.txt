@@ -1,0 +1,11 @@
+plt.rcParams['font.family'] = 'serif'  # Use serif font
+plt.rcParams['font.serif'] = ['Times New Roman']  # Set font
+plt.rcParams['axes.titlesize'] = 16  # Title font size
+plt.rcParams['axes.labelsize'] = 14  # Axis label font size
+plt.rcParams['xtick.labelsize'] = 12  # X-tick label size
+plt.rcParams['ytick.labelsize'] = 12  # Y-tick label size
+plt.rcParams['legend.fontsize'] = 12  # Legend font size
+plt.rcParams['lines.linewidth'] = 2  # Line width
+plt.rcParams['lines.markersize'] = 6  # Marker size
+plt.rcParams['figure.figsize'] = (8.5, 5)  # Figure size (width, height in inches)
+plt.rcParams['savefig.dpi'] = 300  # High resolution for saved figures
